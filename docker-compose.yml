@@ -1,0 +1,22 @@
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - DEV=${DEV}
+    init: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "3m"
+        max-file: "3"
+    # restart: always
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL}
+      - DEV=${DEV}
+      - TZ=${TZ}
+    volumes:
+      - ./app:/app
+      - ./test_data_folder/Base:/data

@@ -1,0 +1,14 @@
+.git
+__pycache__/
+*.pyc
+*.log
+.venv/
+.env
+node_modules/
+data/
+.obsidian/
+.DS_Store
+
+# Папка с кодом монтируется в контейнер
+app/
+test_data_folder/

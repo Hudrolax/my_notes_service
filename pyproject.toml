@@ -1,0 +1,66 @@
+########################################
+# 1) Системные данные для сборки пакета
+########################################
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+########################################
+# 2) Метаданные проекта и prod-зависимости
+########################################
+[project]
+name = "my_notes_service"
+version = "0.0.1"
+description = "Сервис обслушивает мои заметки"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "Hudrolax", email = "hudro795@gmail.com" }
+]
+
+dependencies = [
+  "aiofiles==25.1.0",
+  "PyYAML==6.0.3",
+  "pydantic==2.12.1",
+  "pydantic-settings==2.11.0"
+
+]
+
+########################################
+# 3) dev-зависимости
+########################################
+[project.optional-dependencies]
+dev = [
+  "pynvim"
+]
+
+########################################
+# 4) Где искать пакеты (каталог app/)
+########################################
+[tool.setuptools.packages.find]
+where = [""]               # корень пайтон-пакетов
+exclude = ["tests*"]
+
+########################################
+# 7) Линтеры / форматтеры
+########################################
+[tool.ruff]
+line-length    = 120
+target-version = "py312"
+select         = ["E", "F", "I"]
+extend-select  = ["I"]
+src            = ["app"]
+
+[tool.black]
+line-length    = 120
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+lines_after_imports = 2
+sections = ["STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+force_sort_within_sections = true
+combine_as_imports = false
+default_section = "THIRDPARTY"
