@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # TimeZone settings
     TZ: ZoneInfo = Field(ZoneInfo("UTC"), description="Временная зона")
 
+    FAKE_FILE_WORKING: bool = Field(False, description='Мы работаем в тестовой среде без записи реальных файлов')
+
     # Logging settings
     LOG_LEVEL: LogLevels = Field("INFO", description="Уровень логирования")
 

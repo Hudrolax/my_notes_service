@@ -17,6 +17,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL}
       - DEV=${DEV}
       - TZ=${TZ}
+      - FAKE_FILE_WORKING=${FAKE_FILE_WORKING}
     volumes:
       - ./app:/app
       - ./test_data_folder/Base:/data

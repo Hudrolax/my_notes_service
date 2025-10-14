@@ -7,12 +7,12 @@
 # - Временных файлов не создаём.
 
 from __future__ import annotations
-
 import logging
 from pathlib import Path
 from typing import Dict, Tuple
 
 import aiofiles
+from config import settings
 import yaml
 
 
@@ -32,7 +32,7 @@ def _strip_bom(text: str) -> Tuple[str, bool]:
     """Убирает UTF-8 BOM в начале текста, если он есть, и возвращает (текст, был_ли_BOM)."""
     BOM = "\ufeff"
     if text.startswith(BOM):
-        return text[len(BOM):], True
+        return text[len(BOM) :], True
     return text, False
 
 
@@ -78,6 +78,18 @@ async def _write_text_async(path: Path, data: str) -> None:
 
 
 async def update_frontmatter_async(path: Path, params: Dict[str, object]) -> None:
+    if settings.FAKE_FILE_WORKING:
+        return await _fake_update_frontmatter_async(path, params)
+    else:
+        return await _update_frontmatter_async(path, params)
+
+
+async def _fake_update_frontmatter_async(path: Path, params: Dict[str, object]) -> None:
+    logger.info(f'Фейковый вызов изменения файла для {path}')
+    pass
+
+
+async def _update_frontmatter_async(path: Path, params: Dict[str, object]) -> None:
     """
     Безопасно ОБНОВЛЯЕТ YAML-параметры во фронтматтере MD-файла (асинхронно).
     Условия:
@@ -122,7 +134,7 @@ async def update_frontmatter_async(path: Path, params: Dict[str, object]) -> Non
     new_body = f"{prefix}{new_yaml}{suffix}"
 
     # Вернуть BOM, если он был
-    final_text = (("\ufeff" + new_body) if had_bom else new_body)
+    final_text = ("\ufeff" + new_body) if had_bom else new_body
 
     # Если ничего не поменялось — вообще не трогаем файл
     if final_text == original:
@@ -140,8 +152,6 @@ async def update_frontmatter_async(path: Path, params: Dict[str, object]) -> Non
             await _write_text_async(path, original)
             logger.warning("Восстановил оригинал файла после ошибки записи: %s", path)
         except Exception as restore_err:
-            logger.critical(
-                "Не удалось восстановить исходник файла: %s (%s)", path, restore_err
-            )
+            logger.critical("Не удалось восстановить исходник файла: %s (%s)", path, restore_err)
         # Итоговое исключение наружу (файл либо восстановлен, либо нет — это в логах)
         raise FrontMatterError("Ошибка записи файла; предпринята попытка восстановления.") from write_err

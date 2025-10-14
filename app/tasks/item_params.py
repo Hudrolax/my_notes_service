@@ -115,9 +115,12 @@ async def remove_unnamed_files(start_folder: Path):
             if f.lower().startswith("без названия") and f.endswith(".md"):
                 full_path = root_path / f
                 try:
-                    await asyncio.to_thread(full_path.unlink)
-                    logger.info(f"Удалён файл: {full_path}")
-                    deleted += 1
+                    if settings.FAKE_FILE_WORKING:
+                        logger.info(f'Фейковое удаление файла {full_path}')
+                    else:
+                        await asyncio.to_thread(full_path.unlink)
+                        logger.info(f"Удалён файл: {full_path}")
+                        deleted += 1
                 except Exception as e:
                     logger.error(f"Не удалось удалить {full_path}: {e}")
 
