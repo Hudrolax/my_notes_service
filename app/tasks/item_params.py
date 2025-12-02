@@ -2,15 +2,14 @@
 # path - это путь, где лежит вещь
 
 import asyncio
-from datetime import datetime
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from config import settings
 from utils.file_writing import update_frontmatter_async
 from utils.utils import is_file_in_item_container, is_item_true, return_file_params, walk_through_files
-
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +19,10 @@ async def ensure_correct_path(path: Path):
     Проверяет параметр 'path' в заметке item.
     Если его нет или он отличается от expected_path — обновляет файл.
     """
+    # Пропускаем .trash
+    if ".trash" in path.parts:
+        return
+    # Пропускаем файл, если он не в контейнере с вещами
     if not await is_file_in_item_container(path):
         return
 
@@ -46,12 +49,16 @@ async def ensure_correct_path(path: Path):
         raise
 
 
-async def ensure_correct_dates(path: Path):
+async def ensure_correct_dates(path: Path) -> None:
     """
     Проверяет параметры 'creation_date' и 'modification_date' во фронтматтере Markdown-файла.
     Если их нет или они отличаются от фактических метаданных файла — обновляет файл.
     При обновлении сохраняем исходные atime/mtime, чтобы избежать бессмысленных перезаписей.
     """
+    # Пропускаем .trash
+    if ".trash" in path.parts:
+        return
+
     try:
         # --- Получаем метаданные файла ---
         stat = await asyncio.to_thread(path.stat)
@@ -95,7 +102,6 @@ async def ensure_correct_dates(path: Path):
         logger.error("Ошибка при проверке дат в файле %s: %s", path, e)
         raise
 
-        
 async def remove_unnamed_files(start_folder: Path):
     """
     Удаляет все .md файлы, название которых начинается с 'Без названия',
@@ -116,7 +122,7 @@ async def remove_unnamed_files(start_folder: Path):
                 full_path = root_path / f
                 try:
                     if settings.FAKE_FILE_WORKING:
-                        logger.info(f'Фейковое удаление файла {full_path}')
+                        logger.info(f"Фейковое удаление файла {full_path}")
                     else:
                         await asyncio.to_thread(full_path.unlink)
                         logger.info(f"Удалён файл: {full_path}")
