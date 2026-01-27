@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,23 @@ from utils.utils import is_file_in_item_container, is_item_true, return_file_par
 logger = logging.getLogger(__name__)
 
 
+def is_file_too_young(path: Path, cooldown_seconds: int = 300) -> bool:
+    """
+    Проверяет, прошло ли достаточно времени с момента последнего изменения (или создания) файла.
+    Возвращает True, если файл "слишком молодой" (cooldown еще не прошел).
+    """
+    try:
+        stat = path.stat()
+        # Выбираем самое позднее время из создания и модификации
+        last_action_time = max(stat.st_mtime, getattr(stat, "st_ctime", 0))
+        if time.time() - last_action_time < cooldown_seconds:
+            return True
+    except OSError:
+        # Если не удалось получить статистику, считаем файл старым/безопасным или несуществующим
+        pass
+    return False
+
+
 async def ensure_correct_path(path: Path):
     """
     Проверяет параметр 'path' в заметке item.
@@ -22,6 +40,11 @@ async def ensure_correct_path(path: Path):
     # Пропускаем .trash
     if ".trash" in path.parts:
         return
+
+    # Проверка на cooldown (5 минут)
+    if is_file_too_young(path):
+        return
+
     # Пропускаем файл, если он не в контейнере с вещами
     if not await is_file_in_item_container(path):
         return
@@ -57,6 +80,10 @@ async def ensure_correct_dates(path: Path) -> None:
     """
     # Пропускаем .trash
     if ".trash" in path.parts:
+        return
+
+    # Проверка на cooldown здесь тоже не помешает, если вдруг включим эту функцию
+    if is_file_too_young(path):
         return
 
     try:
@@ -102,6 +129,7 @@ async def ensure_correct_dates(path: Path) -> None:
         logger.error("Ошибка при проверке дат в файле %s: %s", path, e)
         raise
 
+
 async def remove_unnamed_files(start_folder: Path):
     """
     Удаляет все .md файлы, название которых начинается с 'Без названия',
@@ -120,6 +148,11 @@ async def remove_unnamed_files(start_folder: Path):
         for f in files:
             if f.lower().startswith("без названия") and f.endswith(".md"):
                 full_path = root_path / f
+                
+                # Проверка на cooldown (5 минут)
+                if is_file_too_young(full_path):
+                    continue
+
                 try:
                     if settings.FAKE_FILE_WORKING:
                         logger.info(f"Фейковое удаление файла {full_path}")

@@ -15,12 +15,13 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        extra="ignore",
     )
 
     # TimeZone settings
     TZ: ZoneInfo = Field(ZoneInfo("UTC"), description="Временная зона")
 
-    FAKE_FILE_WORKING: bool = Field(False, description='Мы работаем в тестовой среде без записи реальных файлов')
+    FAKE_FILE_WORKING: bool = Field(False, description="Мы работаем в тестовой среде без записи реальных файлов")
 
     # Logging settings
     LOG_LEVEL: LogLevels = Field("INFO", description="Уровень логирования")
