@@ -10,7 +10,7 @@ from pathlib import Path
 
 from config import settings
 from utils.file_writing import update_frontmatter_async
-from utils.utils import is_file_in_item_container, is_item_true, return_file_params, walk_through_files
+from utils.utils import build_item_path, is_file_in_item_container, is_item_true, return_file_params, walk_through_files
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,7 @@ async def ensure_correct_path(path: Path):
             return
 
         current_path = params.get("path")
-
-        idx = path.parts.index(settings.main_warehouse_path)
-
-        short_path = Path(*path.parts[idx + 1 :])
-        actual_path = str(Path(*short_path.parts[:-1]))
+        actual_path = await build_item_path(path)
 
         if current_path != actual_path:
             params["path"] = actual_path

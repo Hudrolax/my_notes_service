@@ -36,21 +36,40 @@ def is_item_true(val: Any) -> bool:
     return str(val.get("item", "")).lower() == "true"
 
 
-async def is_file_in_item_container(file_path: Path) -> bool:
-    file_dir = Path(*file_path.parts[:-1])
-    warehouse_item_file = file_dir.joinpath(file_dir.parts[-1] + ".md")
-
+async def is_item_container_dir(folder_path: Path) -> bool:
+    warehouse_item_file = folder_path / f"{folder_path.name}.md"
     try:
         params = await return_file_params(warehouse_item_file)
         if is_item_true(params):
-            logger.debug(f"{file_dir} - является местом хранения")
+            logger.debug("%s - является местом хранения", folder_path)
             return True
         return False
-    except FileNotFoundError as e:
-        logger.debug(f"{file_dir} НЕ ЯВЛЯЕТСЯ МЕСТОМ ХРАНЕНИЯ!!!")
+    except FileNotFoundError:
+        logger.debug("%s НЕ ЯВЛЯЕТСЯ МЕСТОМ ХРАНЕНИЯ!!!", folder_path)
         return False
     except Exception:
         raise
+
+
+async def is_file_in_item_container(file_path: Path) -> bool:
+    return await is_item_container_dir(file_path.parent)
+
+
+async def build_item_path(file_path: Path, root: Path = Path("/data")) -> str:
+    parts: list[str] = []
+    current_dir = file_path.parent
+
+    while current_dir != current_dir.parent:
+        if current_dir == root:
+            break
+
+        if await is_item_container_dir(current_dir):
+            parts.append(current_dir.name)
+
+        current_dir = current_dir.parent
+
+    parts.reverse()
+    return str(Path(*parts)) if parts else ""
 
 
 async def return_file_params(path: Path) -> dict[str, Any]:
