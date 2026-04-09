@@ -63,9 +63,7 @@ async def build_item_path(file_path: Path, root: Path = Path("/data")) -> str:
         if current_dir == root:
             break
 
-        if await is_item_container_dir(current_dir):
-            parts.append(current_dir.name)
-
+        parts.append(current_dir.name)
         current_dir = current_dir.parent
 
     parts.reverse()
