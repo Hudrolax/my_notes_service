@@ -56,17 +56,27 @@ async def is_file_in_item_container(file_path: Path) -> bool:
 
 
 async def build_item_path(file_path: Path, root: Path = Path("/data")) -> str:
-    parts: list[str] = []
+    # Собираем все директории от file.parent до root (не включая root)
+    dirs: list[Path] = []
     current_dir = file_path.parent
-
-    while current_dir != current_dir.parent:
-        if current_dir == root:
-            break
-
-        parts.append(current_dir.name)
+    while current_dir != root and current_dir != current_dir.parent:
+        dirs.append(current_dir)
         current_dir = current_dir.parent
 
-    parts.reverse()
+    # Переворачиваем: теперь от ближайшего к root к file.parent
+    dirs.reverse()
+
+    # Ищем первую (верхнюю) директорию с item: true
+    start_idx: int | None = None
+    for i, d in enumerate(dirs):
+        if await is_item_container_dir(d):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        return ""
+
+    parts = [d.name for d in dirs[start_idx:]]
     return str(Path(*parts)) if parts else ""
 
 
