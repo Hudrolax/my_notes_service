@@ -12,7 +12,14 @@ from pathlib import Path
 
 from config import settings
 from utils.file_writing import read_markdown_body_async, update_frontmatter_and_body_async, update_frontmatter_async
-from utils.utils import build_item_path, is_file_in_item_container, is_item_true, return_file_params, walk_through_files
+from utils.utils import (
+    build_item_path,
+    is_file_in_item_container,
+    is_item_container_dir,
+    is_item_true,
+    return_file_params,
+    walk_through_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +81,148 @@ def ensure_storage_note_link(markdown_body: str, expected_link: str, newline: st
         return f"{expected_link}{newline}{markdown_body}"
 
     return f"{expected_link}{newline}"
+
+
+async def build_storage_contents_links(folder: Path) -> list[tuple[str, str]]:
+    """
+    Возвращает список пар (текст ссылки, target) для непосредственного содержимого
+    папки места хранения. Сначала идут обычные .md-файлы первого уровня, затем
+    заметки мест хранения подпапок. Внутри групп — сортировка по имени без учёта регистра.
+    """
+    self_filename = f"{folder.name}.md"
+    try:
+        entries = await asyncio.to_thread(lambda: list(folder.iterdir()))
+    except OSError:
+        return []
+
+    regular_stems: list[str] = []
+    container_names: list[str] = []
+
+    for entry in entries:
+        try:
+            if entry.is_file():
+                if entry.name == self_filename:
+                    continue
+                if entry.suffix == ".md":
+                    regular_stems.append(entry.stem)
+            elif entry.is_dir():
+                if entry.name == ".trash":
+                    continue
+                if await is_item_container_dir(entry):
+                    container_names.append(entry.name)
+        except OSError:
+            continue
+
+    regular_stems.sort(key=str.lower)
+    container_names.sort(key=str.lower)
+
+    links: list[tuple[str, str]] = []
+    for stem in regular_stems:
+        target = encode_storage_note_link_target(f"{stem}.md")
+        links.append((stem, target))
+    for name in container_names:
+        encoded_dir = encode_storage_note_link_target(name)
+        encoded_file = encode_storage_note_link_target(f"{name}.md")
+        links.append((name, f"{encoded_dir}/{encoded_file}"))
+
+    return links
+
+
+def parse_managed_storage_list(body: str, newline: str) -> tuple[int, int]:
+    """
+    Находит границы управляемого блока ссылок в начале тела заметки.
+    Возвращает (block_end, manual_start), где
+    block_end — индекс сразу после последней строки управляемого блока,
+    manual_start — индекс начала ручного контента (после возможной пустой строки-разделителя).
+    """
+    if not body:
+        return 0, 0
+
+    pos = 0
+    block_end = 0
+    while pos < len(body):
+        nl_idx = body.find(newline, pos)
+        if nl_idx == -1:
+            line = body[pos:]
+            line_end = len(body)
+        else:
+            line = body[pos:nl_idx]
+            line_end = nl_idx + len(newline)
+
+        if STORAGE_NOTE_LINK_RE.fullmatch(line):
+            block_end = line_end
+            pos = line_end
+        else:
+            break
+
+    if block_end == 0:
+        return 0, 0
+
+    if pos < len(body):
+        nl_idx = body.find(newline, pos)
+        if nl_idx == -1:
+            return block_end, block_end
+        if body[pos:nl_idx] == "":
+            return block_end, nl_idx + len(newline)
+
+    return block_end, block_end
+
+
+def render_managed_storage_list(links: list[tuple[str, str]], newline: str) -> str:
+    if not links:
+        return ""
+    return newline.join(f"[{text}]({target})" for text, target in links) + newline
+
+
+def replace_managed_storage_list(
+    body: str, links: list[tuple[str, str]], newline: str
+) -> str:
+    _, manual_start = parse_managed_storage_list(body, newline)
+    manual_content = body[manual_start:]
+    rendered = render_managed_storage_list(links, newline)
+
+    if not rendered:
+        return manual_content
+    if not manual_content:
+        return rendered
+    return f"{rendered}{newline}{manual_content}"
+
+
+async def ensure_storage_contents_list(path: Path):
+    """
+    Поддерживает в заметке места хранения управляемый список ссылок на
+    непосредственное содержимое папки. Самой заметки в списке нет.
+    """
+    if ".trash" in path.parts:
+        return
+
+    if not is_storage_note_file(path):
+        return
+
+    if is_file_too_young(path):
+        return
+
+    try:
+        params = await return_file_params(path)
+        if not is_item_true(params):
+            return
+
+        expected_links = await build_storage_contents_links(path.parent)
+        current_body, newline = await read_markdown_body_async(path)
+        new_body = replace_managed_storage_list(current_body, expected_links, newline)
+        if new_body == current_body:
+            return
+
+        logger.info("Обновляю список содержимого места хранения для %s", path)
+        await update_frontmatter_and_body_async(
+            path,
+            params,
+            lambda body, nl: replace_managed_storage_list(body, expected_links, nl),
+        )
+
+    except Exception as e:
+        logger.error(e)
+        raise
 
 
 async def ensure_correct_path(path: Path):
@@ -234,6 +383,7 @@ async def make_actual_item_params():
     logger.info("Запустил задачу корректировке параметров для заметок")
     while True:
         await walk_through_files(Path("/data"), handler=ensure_correct_path)
+        await walk_through_files(Path("/data"), handler=ensure_storage_contents_list)
         # await walk_through_files(Path("/data"), handler=ensure_correct_dates)
         await remove_unnamed_files(Path("/data"))
 
