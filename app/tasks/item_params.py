@@ -4,15 +4,20 @@
 import asyncio
 import logging
 import os
+import re
+import string
 import time
 from datetime import datetime
 from pathlib import Path
 
 from config import settings
-from utils.file_writing import update_frontmatter_async
+from utils.file_writing import read_markdown_body_async, update_frontmatter_and_body_async, update_frontmatter_async
 from utils.utils import build_item_path, is_file_in_item_container, is_item_true, return_file_params, walk_through_files
 
 logger = logging.getLogger(__name__)
+
+STORAGE_NOTE_LINK_RE = re.compile(r"^\[[^\]\n]+\]\([^\n)]+\.md\)$")
+LINK_TARGET_SAFE_ASCII = frozenset(string.ascii_letters + string.digits + "-._~")
 
 
 def is_file_too_young(path: Path, cooldown_seconds: int = 300) -> bool:
@@ -32,10 +37,45 @@ def is_file_too_young(path: Path, cooldown_seconds: int = 300) -> bool:
     return False
 
 
+def encode_storage_note_link_target(filename: str) -> str:
+    """
+    Кодирует символы, которые ломают markdown-ссылку, но оставляет читаемые Unicode-имена.
+    """
+    encoded = []
+    for char in filename:
+        if char.isascii() and char not in LINK_TARGET_SAFE_ASCII:
+            encoded.extend(f"%{byte:02X}" for byte in char.encode("utf-8"))
+        else:
+            encoded.append(char)
+    return "".join(encoded)
+
+
+def build_storage_note_link(item_path: str) -> str:
+    storage_note_name = Path(item_path).name
+    storage_note_filename = f"{storage_note_name}.md"
+    encoded_filename = encode_storage_note_link_target(storage_note_filename)
+    return f"[{storage_note_name}]({encoded_filename})"
+
+
+def ensure_storage_note_link(markdown_body: str, expected_link: str, newline: str = "\n") -> str:
+    first_line, separator, rest = markdown_body.partition(newline)
+
+    if first_line == expected_link:
+        return markdown_body
+
+    if STORAGE_NOTE_LINK_RE.fullmatch(first_line):
+        return f"{expected_link}{separator}{rest}" if separator else expected_link
+
+    if markdown_body:
+        return f"{expected_link}{newline}{markdown_body}"
+
+    return f"{expected_link}{newline}"
+
+
 async def ensure_correct_path(path: Path):
     """
-    Проверяет параметр 'path' в заметке item.
-    Если его нет или он отличается от expected_path — обновляет файл.
+    Проверяет параметр 'path' и первую ссылку на заметку места хранения в заметке item.
+    Если они отсутствуют или отличаются от ожидаемых — обновляет файл.
     """
     # Пропускаем .trash
     if ".trash" in path.parts:
@@ -57,11 +97,28 @@ async def ensure_correct_path(path: Path):
 
         current_path = params.get("path")
         actual_path = await build_item_path(path)
+        if not actual_path:
+            return
+
+        expected_link = build_storage_note_link(actual_path)
+        changes = []
 
         if current_path != actual_path:
             params["path"] = actual_path
-            logger.info(f"Обновляю path для {path}")
-            await update_frontmatter_async(path, params)
+            changes.append("path")
+
+        current_body, newline = await read_markdown_body_async(path)
+        if ensure_storage_note_link(current_body, expected_link, newline) != current_body:
+            changes.append("ссылку на заметку места хранения")
+
+        if not changes:
+            return
+
+        def update_storage_link(markdown_body: str, newline: str) -> str:
+            return ensure_storage_note_link(markdown_body, expected_link, newline)
+
+        logger.info("Обновляю %s для %s", ", ".join(changes), path)
+        await update_frontmatter_and_body_async(path, params, update_storage_link)
 
     except Exception as e:
         logger.error(e)

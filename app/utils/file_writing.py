@@ -7,6 +7,7 @@
 # - Временных файлов не создаём.
 
 from __future__ import annotations
+from collections.abc import Callable
 import logging
 from pathlib import Path
 from typing import Dict, Tuple
@@ -67,6 +68,24 @@ def _find_frontmatter_bounds(text: str) -> Tuple[int, int, str]:
     raise FrontMatterError("Не найден закрывающий разделитель '---' у фронтматтера.")
 
 
+def _find_frontmatter_parts(text: str) -> tuple[int, int, int, str]:
+    """
+    Возвращает (yaml_start, yaml_end, body_start, newline).
+    body_start указывает на первый символ после закрывающей строки '---'.
+    """
+    yaml_start, yaml_end, nl = _find_frontmatter_bounds(text)
+    lines = text.split(nl)
+
+    for i in range(1, len(lines)):
+        if lines[i] == "---":
+            body_start = len(nl.join(lines[: i + 1]))
+            if i + 1 < len(lines):
+                body_start += len(nl)
+            return yaml_start, yaml_end, body_start, nl
+
+    raise FrontMatterError("Не найден закрывающий разделитель '---' у фронтматтера.")
+
+
 async def _read_text_async(path: Path) -> str:
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
         return await f.read()
@@ -77,6 +96,13 @@ async def _write_text_async(path: Path, data: str) -> None:
         await f.write(data)
 
 
+async def read_markdown_body_async(path: Path) -> tuple[str, str]:
+    original = await _read_text_async(path)
+    body_text, _ = _strip_bom(original)
+    _, _, body_start, nl = _find_frontmatter_parts(body_text)
+    return body_text[body_start:], nl
+
+
 async def update_frontmatter_async(path: Path, params: Dict[str, object]) -> None:
     if settings.FAKE_FILE_WORKING:
         return await _fake_update_frontmatter_async(path, params)
@@ -84,8 +110,28 @@ async def update_frontmatter_async(path: Path, params: Dict[str, object]) -> Non
         return await _update_frontmatter_async(path, params)
 
 
+async def update_frontmatter_and_body_async(
+    path: Path,
+    params: Dict[str, object],
+    body_transform: Callable[[str, str], str],
+) -> None:
+    if settings.FAKE_FILE_WORKING:
+        return await _fake_update_frontmatter_and_body_async(path, params, body_transform)
+    else:
+        return await _update_frontmatter_and_body_async(path, params, body_transform)
+
+
 async def _fake_update_frontmatter_async(path: Path, params: Dict[str, object]) -> None:
     logger.info(f'Фейковый вызов изменения файла для {path}')
+    pass
+
+
+async def _fake_update_frontmatter_and_body_async(
+    path: Path,
+    params: Dict[str, object],
+    body_transform: Callable[[str, str], str],
+) -> None:
+    logger.info(f"Фейковый вызов изменения параметров и тела файла для {path}")
     pass
 
 
@@ -154,4 +200,55 @@ async def _update_frontmatter_async(path: Path, params: Dict[str, object]) -> No
         except Exception as restore_err:
             logger.critical("Не удалось восстановить исходник файла: %s (%s)", path, restore_err)
         # Итоговое исключение наружу (файл либо восстановлен, либо нет — это в логах)
+        raise FrontMatterError("Ошибка записи файла; предпринята попытка восстановления.") from write_err
+
+
+async def _update_frontmatter_and_body_async(
+    path: Path,
+    params: Dict[str, object],
+    body_transform: Callable[[str, str], str],
+) -> None:
+    """
+    Безопасно обновляет YAML-параметры и тело Markdown-файла за одну запись.
+    body_transform получает текущее тело файла и стиль перевода строк.
+    """
+    original = await _read_text_async(path)
+    body_text, had_bom = _strip_bom(original)
+    yaml_start, yaml_end, body_start, nl = _find_frontmatter_parts(body_text)
+
+    yaml_text = body_text[yaml_start:yaml_end]
+    try:
+        meta = yaml.safe_load(yaml_text) or {}
+    except yaml.YAMLError as e:
+        raise FrontMatterError(f"Ошибка разбора YAML: {e}")
+    if not isinstance(meta, dict):
+        raise FrontMatterError("Фронтматтер должен быть YAML mapping (ключ-значение).")
+
+    meta.update(params)
+
+    new_yaml = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
+    if nl != "\n":
+        new_yaml = new_yaml.replace("\n", nl)
+
+    current_body = body_text[body_start:]
+    new_markdown_body = body_transform(current_body, nl)
+
+    prefix = body_text[:yaml_start]
+    between_yaml_and_body = body_text[yaml_end:body_start]
+    new_body = f"{prefix}{new_yaml}{between_yaml_and_body}{new_markdown_body}"
+    final_text = ("\ufeff" + new_body) if had_bom else new_body
+
+    if final_text == original:
+        return
+
+    try:
+        await _write_text_async(path, final_text)
+        logger.debug("Обновил параметры и тело файла: %s", path)
+    except Exception as write_err:
+        logger.warning("Не удалось записать параметры и тело файла: %s (%s)", path, write_err)
+        try:
+            await _write_text_async(path, original)
+            logger.warning("Восстановил оригинал файла после ошибки записи: %s", path)
+        except Exception as restore_err:
+            logger.critical("Не удалось восстановить исходник файла: %s (%s)", path, restore_err)
         raise FrontMatterError("Ошибка записи файла; предпринята попытка восстановления.") from write_err
