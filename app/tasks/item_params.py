@@ -57,6 +57,10 @@ def build_storage_note_link(item_path: str) -> str:
     return f"[{storage_note_name}]({encoded_filename})"
 
 
+def is_storage_note_file(path: Path) -> bool:
+    return path.name == f"{path.parent.name}.md"
+
+
 def ensure_storage_note_link(markdown_body: str, expected_link: str, newline: str = "\n") -> str:
     first_line, separator, rest = markdown_body.partition(newline)
 
@@ -100,21 +104,25 @@ async def ensure_correct_path(path: Path):
         if not actual_path:
             return
 
-        expected_link = build_storage_note_link(actual_path)
         changes = []
 
         if current_path != actual_path:
             params["path"] = actual_path
             changes.append("path")
 
-        current_body, newline = await read_markdown_body_async(path)
-        if ensure_storage_note_link(current_body, expected_link, newline) != current_body:
-            changes.append("ссылку на заметку места хранения")
+        should_update_storage_link = not is_storage_note_file(path)
+        if should_update_storage_link:
+            expected_link = build_storage_note_link(actual_path)
+            current_body, newline = await read_markdown_body_async(path)
+            if ensure_storage_note_link(current_body, expected_link, newline) != current_body:
+                changes.append("ссылку на заметку места хранения")
 
         if not changes:
             return
 
         def update_storage_link(markdown_body: str, newline: str) -> str:
+            if not should_update_storage_link:
+                return markdown_body
             return ensure_storage_note_link(markdown_body, expected_link, newline)
 
         logger.info("Обновляю %s для %s", ", ".join(changes), path)
